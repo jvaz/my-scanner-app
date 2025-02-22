@@ -6,11 +6,51 @@
         alt="Celfocus Logo"
       />
     </header>
-    <!-- Clicking the container toggles the camera -->
-    <div id="camera-container" @click="toggleScanner">
-      <!-- Use a ref to target the scanner container -->
+    <h1>Camera Test</h1>
+    <!-- Toggle for camera mode. Disabled if scanner is running -->
+    <div class="toggle-mode">
+      <label>
+        <input
+          type="radio"
+          v-model="cameraMode"
+          value="inline"
+          :disabled="isScannerRunning"
+        />
+        Inline
+      </label>
+      <label>
+        <input
+          type="radio"
+          v-model="cameraMode"
+          value="modal"
+          :disabled="isScannerRunning"
+        />
+        Modal
+      </label>
+    </div>
+
+    <!-- Inline Mode: Render the camera container on the page -->
+    <div
+      v-if="cameraMode === 'inline'"
+      id="camera-container"
+      @click="toggleScanner"
+      :key="scannerKey"
+    >
       <div id="scanner" ref="scannerContainer"></div>
     </div>
+
+    <!-- Modal Mode: Render a modal overlay when scanner is active -->
+    <div
+      v-if="cameraMode === 'modal' && showModal"
+      class="modal-overlay"
+      @click.self="stopScanner"
+    >
+      <div class="modal-content" :key="scannerKey">
+        <div id="scanner" ref="scannerContainer"></div>
+        <button class="close-btn" @click="stopScanner">Close</button>
+      </div>
+    </div>
+
     <div id="output">
       Scanned Result: <span>{{ scannedResult }}</span>
     </div>
@@ -18,12 +58,22 @@
     <div v-if="errorMessage" class="error-message">
       {{ errorMessage }}
     </div>
+    <!-- Buttons to manually start/stop the scanner -->
     <button @click="startScanner" :disabled="isScannerRunning">
       Start Scanner
     </button>
+    <!-- Stop button now disabled when scanner isn't running regardless of mode -->
     <button @click="stopScanner" :disabled="!isScannerRunning">
       Stop Scanner
     </button>
+
+    <!-- Log output -->
+    <div id="log">
+      <h2>Application Log</h2>
+      <ul>
+        <li v-for="(log, index) in logs" :key="index">{{ log }}</li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -37,40 +87,56 @@ export default {
       isScannerRunning: false,
       scannedResult: 'None',
       cameraStream: null,
-      errorMessage: '', // Holds error info if camera is unavailable
-      errorTimer: null  // Timer to auto-clear error message
+      errorMessage: '',
+      errorTimer: null,
+      // Camera mode can be 'inline' or 'modal'
+      cameraMode: 'inline',
+      // For modal mode: controls whether the modal is shown
+      showModal: false,
+      // Dynamic key to force re-render of the scanner container
+      scannerKey: 0,
+      logs: [] // Array to hold log messages
     };
   },
+  watch: {
+    cameraMode() {
+      this.addLog(`Camera mode changed to: ${this.cameraMode}`);
+      this.scannerKey++;
+    }
+  },
   methods: {
-    // Helper to show an error message for 5 seconds
+    addLog(message) {
+      const timestamp = new Date().toLocaleTimeString();
+      this.logs.push(`${timestamp}: ${message}`);
+    },
+    // Helper to show an error message for 5 seconds, with logging.
     showError(message) {
       if (this.errorTimer) {
         clearTimeout(this.errorTimer);
       }
       this.errorMessage = message;
+      this.addLog(`Error: ${message}`);
       this.errorTimer = setTimeout(() => {
         this.errorMessage = '';
         this.errorTimer = null;
       }, 5000);
     },
-    startScanner() {
-      if (this.isScannerRunning) return;
-
-      // Clear any previous error
+    // Common logic to initialize and start the scanner
+    initScanner() {
       if (this.errorTimer) {
         clearTimeout(this.errorTimer);
         this.errorTimer = null;
       }
       this.errorMessage = '';
+      this.addLog("Initializing scanner...");
 
       Quagga.init(
         {
           inputStream: {
             type: 'LiveStream',
-            // Use the ref for the scanner container
             target: this.$refs.scannerContainer,
             constraints: {
-              facingMode: 'environment' // Use the back camera
+              facingMode: 'environment'
             }
           },
           decoder: {
@@ -84,21 +150,30 @@ export default {
         },
         (err) => {
           if (err) {
+            this.addLog(`QuaggaJS Initialization Error: ${err.name} - ${err.message}`);
             console.error('QuaggaJS Initialization Error:', err);
-            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            if (
+              err.name === 'NotAllowedError' ||
+              err.name === 'PermissionDeniedError'
+            ) {
               this.showError('Camera access was denied. Please allow camera permissions.');
-            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+            } else if (
+              err.name === 'NotReadableError' ||
+              err.name === 'TrackStartError'
+            ) {
               this.showError('The camera is currently in use by another application. Please close it and try again.');
             } else {
               this.showError('Unable to access the camera. Please try again later.');
             }
+            if (this.cameraMode === 'modal') {
+              this.showModal = false;
+            }
             return;
           }
+          this.addLog("Calling Quagga.start()...");
           Quagga.start();
           this.isScannerRunning = true;
-          console.log('QuaggaJS started');
-
-          // Save the active camera stream
+          this.addLog("Scanner started successfully.");
           const video = this.$refs.scannerContainer.querySelector('video');
           this.cameraStream = video ? video.srcObject : null;
         }
@@ -106,34 +181,83 @@ export default {
 
       Quagga.onDetected((data) => {
         this.scannedResult = data.codeResult.code;
-        console.log('Detected code:', data.codeResult.code);
+        this.addLog(`Detected code: ${data.codeResult.code}`);
+      });
+    },
+    startScanner() {
+      if (this.isScannerRunning) return;
+      this.addLog("Attempting to start scanner...");
+      // Force a fresh render of the scanner container
+      this.scannerKey++;
+      this.$nextTick(() => {
+        if (this.cameraMode === 'modal') {
+          this.showModal = true;
+          this.addLog("Showing modal...");
+          this.$nextTick(() => {
+            this.initScanner();
+          });
+        } else {
+          this.initScanner();
+        }
       });
     },
     stopScanner() {
-      if (!this.isScannerRunning) return;
-
+      // Allow closing the modal even if scanner isn't running
+      if (!this.isScannerRunning) {
+        if (this.cameraMode === 'modal' && this.showModal) {
+          //this.addLog("Closing modal...");
+          this.showModal = false;
+        }
+        return;
+      }
+      this.addLog("Stopping scanner...");
       Quagga.stop();
-      // Clear the video element from the scanner container
-      this.$refs.scannerContainer.innerHTML = '';
+
+      // Explicitly reset the video element if it exists.
+      if (this.$refs.scannerContainer) {
+        if (this.$refs.scannerContainer.querySelector('video')) {
+          this.$refs.scannerContainer.querySelector('video').pause();
+          this.$refs.scannerContainer.querySelector('video').srcObject = null;
+          this.addLog("Video element paused and srcObject cleared.");
+        }
+      }
+      // Force re-render of the scanner container
+      this.scannerKey++;
+
+      // Clear the container's HTML (for inline mode)
+      if (this.cameraMode === 'inline' && this.$refs.scannerContainer) {
+        this.$refs.scannerContainer.innerHTML = '';
+        this.addLog("Scanner container innerHTML cleared.");
+      }
+      // Stop all media tracks
       if (this.cameraStream) {
-        this.cameraStream.getTracks().forEach((track) => track.stop());
+        //const tracks = this.cameraStream.getTracks();
+        this.cameraStream.getTracks().forEach((track, index) => {
+          track.stop();
+          this.addLog(`Track ${index} (${track.kind}) stopped.`);
+        });
+        this.cameraStream = null;
       }
       Quagga.offDetected();
       this.isScannerRunning = false;
-      console.log('QuaggaJS stopped');
-
+      this.addLog("Scanner stopped and all references cleared.");
       if (this.errorTimer) {
         clearTimeout(this.errorTimer);
         this.errorTimer = null;
       }
       this.errorMessage = '';
+      
+      if (this.cameraMode === 'modal') {
+        //this.addLog("Closing modal...");
+        this.showModal = false;
+      }
+      //window.location.reload(true);
+
     },
-    // Toggle scanner when clicking the camera area
+    // Toggle scanner when clicking on the camera container (only for inline mode)
     toggleScanner() {
-      if (this.isScannerRunning) {
-        this.stopScanner();
-      } else {
-        this.startScanner();
+      if (this.cameraMode === 'inline') {
+        this.isScannerRunning ? this.stopScanner() : this.startScanner();
       }
     }
   },
@@ -180,6 +304,16 @@ h1 {
   font-weight: bold;
 }
 
+/* Toggle controls */
+.toggle-mode {
+  margin-bottom: 20px;
+}
+.toggle-mode label {
+  margin-right: 15px;
+  font-weight: bold;
+}
+
+/* Inline mode container */
 #camera-container {
   position: relative;
   width: 100%;
@@ -191,9 +325,45 @@ h1 {
   overflow: hidden;
   border-radius: 8px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  cursor: pointer; /* Indicate clickable area */
+  cursor: pointer;
 }
 
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-content {
+  position: relative;
+  width: 600px;
+  max-width: 90%;
+  height: 350px;
+  background: #f4f4f4;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #1e1e1e;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+/* Scanner video styling */
 #scanner video {
   width: 100%;
   height: 100%;
@@ -234,5 +404,31 @@ button:hover {
 button:disabled {
   background-color: #b3b3b3;
   cursor: not-allowed;
+}
+
+/* Log styles */
+#log {
+  margin: 20px auto;
+  max-width: 600px;
+  text-align: left;
+  background: #f9f9f9;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+#log h2 {
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+#log ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#log li {
+  font-size: 14px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 3px;
 }
 </style>
