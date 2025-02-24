@@ -121,7 +121,7 @@ export default {
         this.errorTimer = null;
       }, 5000);
     },
-    // Common logic to initialize and start the scanner
+    // Initialize the scanner and then start it upon successful initialization.
     initScanner() {
       if (this.errorTimer) {
         clearTimeout(this.errorTimer);
@@ -170,12 +170,9 @@ export default {
             }
             return;
           }
-          this.addLog("Calling Quagga.start()...");
-          Quagga.start();
-          this.isScannerRunning = true;
-          this.addLog("Scanner started successfully.");
-          const video = this.$refs.scannerContainer.querySelector('video');
-          this.cameraStream = video ? video.srcObject : null;
+          // On successful initialization, start the scanner.
+          this.addLog("Initializing scanner Complete... Calling startScannerAfterInit");
+          this.startScannerAfterInit();
         }
       );
 
@@ -183,6 +180,15 @@ export default {
         this.scannedResult = data.codeResult.code;
         this.addLog(`Detected code: ${data.codeResult.code}`);
       });
+    },
+    // This method is called only after Quagga.init is successful.
+    startScannerAfterInit() {
+      this.addLog("Calling Quagga.start()...");
+      Quagga.start();
+      this.isScannerRunning = true;
+      this.addLog("Scanner started successfully.");
+
+      this.cameraStream = (this.$refs.scannerContainer.querySelector('video')) ? (this.$refs.scannerContainer.querySelector('video')).srcObject : null;
     },
     startScanner() {
       if (this.isScannerRunning) return;
@@ -205,7 +211,6 @@ export default {
       // Allow closing the modal even if scanner isn't running
       if (!this.isScannerRunning) {
         if (this.cameraMode === 'modal' && this.showModal) {
-          //this.addLog("Closing modal...");
           this.showModal = false;
         }
         return;
@@ -215,6 +220,7 @@ export default {
 
       // Explicitly reset the video element if it exists.
       if (this.$refs.scannerContainer) {
+        
         if (this.$refs.scannerContainer.querySelector('video')) {
           this.$refs.scannerContainer.querySelector('video').pause();
           this.$refs.scannerContainer.querySelector('video').srcObject = null;
@@ -231,7 +237,6 @@ export default {
       }
       // Stop all media tracks
       if (this.cameraStream) {
-        //const tracks = this.cameraStream.getTracks();
         this.cameraStream.getTracks().forEach((track, index) => {
           track.stop();
           this.addLog(`Track ${index} (${track.kind}) stopped.`);
@@ -248,11 +253,8 @@ export default {
       this.errorMessage = '';
       
       if (this.cameraMode === 'modal') {
-        //this.addLog("Closing modal...");
         this.showModal = false;
       }
-      //window.location.reload(true);
-
     },
     // Toggle scanner when clicking on the camera container (only for inline mode)
     toggleScanner() {
