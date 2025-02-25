@@ -62,7 +62,6 @@
     <button @click="startScanner" :disabled="isScannerRunning">
       Start Scanner
     </button>
-    <!-- Stop button now disabled when scanner isn't running regardless of mode -->
     <button @click="stopScanner" :disabled="!isScannerRunning">
       Stop Scanner
     </button>
@@ -73,6 +72,25 @@
       <ul>
         <li v-for="(log, index) in logs" :key="index">{{ log }}</li>
       </ul>
+    </div>
+
+    <!-- New Test Camera Section (without QuaggaJS) -->
+    <div id="test-camera-section">
+      <h2>Test Camera Section</h2>
+      <video
+        ref="testCameraVideo"
+        autoplay
+        muted
+        playsinline
+        style="width: 100%; max-width: 600px; height: auto; border: 1px solid #ccc;"
+      ></video>
+      <br />
+      <button @click="startTestCamera" :disabled="testCameraRunning">
+        Start Test Camera
+      </button>
+      <button @click="stopTestCamera" :disabled="!testCameraRunning">
+        Stop Test Camera
+      </button>
     </div>
   </div>
 </template>
@@ -95,7 +113,11 @@ export default {
       showModal: false,
       // Dynamic key to force re-render of the scanner container
       scannerKey: 0,
-      logs: [] // Array to hold log messages
+      logs: [], // Array to hold log messages
+
+      // Properties for the test camera (without QuaggaJS)
+      testCameraRunning: false,
+      testCameraStream: null
     };
   },
   watch: {
@@ -121,7 +143,7 @@ export default {
         this.errorTimer = null;
       }, 5000);
     },
-    // Initialize the scanner and then start it upon successful initialization.
+    // QuaggaJS scanner initialization
     initScanner() {
       if (this.errorTimer) {
         clearTimeout(this.errorTimer);
@@ -181,14 +203,15 @@ export default {
         this.addLog(`Detected code: ${data.codeResult.code}`);
       });
     },
-    // This method is called only after Quagga.init is successful.
     startScannerAfterInit() {
       this.addLog("Calling Quagga.start()...");
       Quagga.start();
       this.isScannerRunning = true;
       this.addLog("Scanner started successfully.");
 
-      this.cameraStream = (this.$refs.scannerContainer.querySelector('video')) ? (this.$refs.scannerContainer.querySelector('video')).srcObject : null;
+      this.cameraStream = (this.$refs.scannerContainer.querySelector('video')) 
+        ? this.$refs.scannerContainer.querySelector('video').srcObject 
+        : null;
     },
     startScanner() {
       if (this.isScannerRunning) return;
@@ -208,7 +231,6 @@ export default {
       });
     },
     stopScanner() {
-      // Allow closing the modal even if scanner isn't running
       if (!this.isScannerRunning) {
         if (this.cameraMode === 'modal' && this.showModal) {
           this.showModal = false;
@@ -218,24 +240,19 @@ export default {
       this.addLog("Stopping scanner...");
       Quagga.stop();
 
-      // Explicitly reset the video element if it exists.
       if (this.$refs.scannerContainer) {
-        
-        if (this.$refs.scannerContainer.querySelector('video')) {
-          this.$refs.scannerContainer.querySelector('video').pause();
-          this.$refs.scannerContainer.querySelector('video').srcObject = null;
+        const videoEl = this.$refs.scannerContainer.querySelector('video');
+        if (videoEl) {
+          videoEl.pause();
+          videoEl.srcObject = null;
           this.addLog("Video element paused and srcObject cleared.");
         }
       }
-      // Force re-render of the scanner container
       this.scannerKey++;
-
-      // Clear the container's HTML (for inline mode)
       if (this.cameraMode === 'inline' && this.$refs.scannerContainer) {
         this.$refs.scannerContainer.innerHTML = '';
         this.addLog("Scanner container innerHTML cleared.");
       }
-      // Stop all media tracks
       if (this.cameraStream) {
         this.cameraStream.getTracks().forEach((track, index) => {
           track.stop();
@@ -256,16 +273,49 @@ export default {
         this.showModal = false;
       }
     },
-    // Toggle scanner when clicking on the camera container (only for inline mode)
     toggleScanner() {
       if (this.cameraMode === 'inline') {
         this.isScannerRunning ? this.stopScanner() : this.startScanner();
       }
+    },
+    // New methods for testing the camera without QuaggaJS.
+    startTestCamera() {
+      if (this.testCameraRunning) return;
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+          this.$refs.testCameraVideo.srcObject = stream;
+          this.testCameraStream = stream;
+          this.testCameraRunning = true;
+          this.addLog('Test camera started.');
+        })
+        .catch((err) => {
+          this.addLog(`Error starting test camera: ${err}`);
+          this.showError(`Error starting test camera: ${err.message}`);
+        });
+    },
+    stopTestCamera() {
+      if (!this.testCameraRunning) return;
+      if (this.testCameraStream) {
+        this.testCameraStream.getTracks().forEach((track, index) => {
+          track.stop();
+          this.addLog(`Test camera track ${index} (${track.kind}) stopped.`);
+        });
+      }
+      // Clear the video element source
+      if (this.$refs.testCameraVideo) {
+        this.$refs.testCameraVideo.srcObject = null;
+      }
+      this.testCameraRunning = false;
+      this.testCameraStream = null;
+      this.addLog('Test camera stopped.');
     }
   },
   beforeUnmount() {
     if (this.isScannerRunning) {
       this.stopScanner();
+    }
+    if (this.testCameraRunning) {
+      this.stopTestCamera();
     }
     if (this.errorTimer) {
       clearTimeout(this.errorTimer);
@@ -432,5 +482,15 @@ button:disabled {
   margin-bottom: 5px;
   border-bottom: 1px solid #eee;
   padding-bottom: 3px;
+}
+
+/* Test camera section styling */
+#test-camera-section {
+  margin: 20px auto;
+  max-width: 600px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f9f9f9;
 }
 </style>
